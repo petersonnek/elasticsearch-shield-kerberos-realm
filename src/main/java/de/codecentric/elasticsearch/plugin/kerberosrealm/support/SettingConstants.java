@@ -33,10 +33,10 @@ public class SettingConstants {
     
     public static final String LDAP_URL = "ldap_url";
     public static final String LDAP_DOMAIN = "ldap_domain";
-    public static final String LDAP_GROUP_BASE = "ldap_group_base";
     public static final String LDAP_USER = "ldap_user";
     public static final String LDAP_PASSWORD = "ldap_password";
-    
+    public static final String ROLE_MAPPING_PATH = "role_mapping_path";
+
     public static final String KEYSTORE_PATH = "shield.ssl.keystore.path";
     public static final String KEYSTORE_PASSWORD = "shield.ssl.keystore.password";
     
