@@ -252,18 +252,6 @@ public class KerberosRealm extends Realm<KerberosAuthenticationToken> {
         return strSid.toString();    
     }
 
-    private boolean isInRole(String group, String principal){
-        String query = "(&(objectClass=user)(sAMAccountName=" + principal + ")(memberOf:1.2.840.113556.1.4.1941:=" + group + "))";
-        logger.debug("isInRole query: " + query);
-        NamingEnumeration<SearchResult> results = queryLdap(query);
-        try{
-            logger.debug("isInRole hasMoreElements: " + results.hasMoreElements());
-            return results.hasMoreElements();
-        }catch(Exception e){
-            return false;
-        }
-    }
-
     private NamingEnumeration<SearchResult> queryLdap(String query){
         Hashtable<String, Object> env = new Hashtable<String, Object>(11);
         env.put(Context.INITIAL_CONTEXT_FACTORY, "com.sun.jndi.ldap.LdapCtxFactory");
@@ -388,6 +376,35 @@ public class KerberosRealm extends Realm<KerberosAuthenticationToken> {
         return null;
     }
 
+    private ArrayList<String> getUserRoles(String sAMAccountName){
+        ArrayList<String> groups = new ArrayList<String>();
+        String query = "(&(objectClass=user)(sAMAccountName=" + sAMAccountName + "))";
+
+        try{
+            NamingEnumeration<SearchResult> result = queryLdap(query);
+            //javax.naming.directory.Attributes
+            if(result != null && result.hasMore()){
+                SearchResult user = result.nextElement();
+                javax.naming.directory.Attributes userAttributes = user.getAttributes();
+                javax.naming.directory.Attribute memberobAttribute =  userAttributes.get("memberof");
+
+                NamingEnumeration memberGroups = memberobAttribute.getAll();
+                while (memberGroups.hasMore() ) {
+                    String group = memberGroups.next().toString();
+                    if(!groups.contains(group)){
+                        logger.debug("User {} in LDAP group {}", sAMAccountName, group);
+                        groups.add(group);
+                    }
+                }
+            }
+        }catch (Exception e){
+            logger.warn("Error occurred filtering user groups", e);
+        }
+
+        return groups;
+    }
+
+
     @Override
     public boolean supports(final AuthenticationToken token) {
         return token instanceof KerberosAuthenticationToken;
@@ -478,14 +495,8 @@ public class KerberosRealm extends Realm<KerberosAuthenticationToken> {
 
                     principal = Subject.doAs(subject, new AuthenticateAction(logger, gssContext, stripRealmFromPrincipalName));
 
-                    // find any groups with ldap
-                    groups = new ArrayList<String>();
-                    for(String group:groupMap.keys()){
-                        if(!groups.contains(group) && isInRole(group, principal.getName())){
-                            logger.debug("User {} in LDAP group {}", principal.getName(), group);
-                            groups.add(group);
-                        }
-                    }
+                    groups = getUserRoles(principal.getName());
+
                 } catch (final LoginException e) {
                     logger.error("Login exception due to {}", e, e.toString());
                     throw ExceptionsHelper.convertToRuntime(e);
