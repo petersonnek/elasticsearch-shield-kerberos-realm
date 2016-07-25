@@ -252,6 +252,18 @@ public class KerberosRealm extends Realm<KerberosAuthenticationToken> {
         return strSid.toString();    
     }
 
+        private boolean isInRole(String group, String principal){
+            String query = "(&(objectClass=user)(sAMAccountName=" + principal + ")(memberOf:1.2.840.113556.1.4.1941:=" + group + "))";
+            logger.debug("isInRole query: " + query);
+            NamingEnumeration<SearchResult> results = queryLdap(query);
+            try{
+                logger.debug("isInRole hasMoreElements: " + results.hasMoreElements());
+                return results.hasMoreElements();
+            } catch(Exception e){
+                return false;
+            }
+        }
+
     private NamingEnumeration<SearchResult> queryLdap(String query){
         Hashtable<String, Object> env = new Hashtable<String, Object>(11);
         env.put(Context.INITIAL_CONTEXT_FACTORY, "com.sun.jndi.ldap.LdapCtxFactory");
