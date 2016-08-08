@@ -35,7 +35,13 @@ public class SettingConstants {
     public static final String LDAP_DOMAIN = "ldap_domain";
     public static final String LDAP_USER = "ldap_user";
     public static final String LDAP_PASSWORD = "ldap_password";
-    public static final String ROLE_MAPPING_PATH = "role_mapping_path";
+    public static final String LDAP_CACHE_MINUTES = "ldap_cache_minutes";
+    public static final String MAX_NESTED_GROUP_DEPTH = "max_nested_group_depth";
+    public static final String MAX_THREADS_TO_USE_TO_FIND_NESTED_GROUPS = "max_threads_to_use_to_find_nested_groups";
+
+    public static final int DEFAULT_LDAP_CACHE_MINUTES = 60;
+    public static final int DEFAULT_MAX_NESTED_GROUP_DEPTH = 15;
+    public static final int DEFAULT_MAX_THREADS_TO_USE_TO_FIND_NESTED_GROUPS = 50;
 
     public static final String KEYSTORE_PATH = "shield.ssl.keystore.path";
     public static final String KEYSTORE_PASSWORD = "shield.ssl.keystore.password";

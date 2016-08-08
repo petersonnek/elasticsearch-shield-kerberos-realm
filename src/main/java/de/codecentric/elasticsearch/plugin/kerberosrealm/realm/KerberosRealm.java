@@ -18,24 +18,16 @@
  */
 package de.codecentric.elasticsearch.plugin.kerberosrealm.realm;
 
-import java.io.IOException;
-import java.io.InputStream;
 import java.io.Serializable;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.security.Principal;
 import java.security.PrivilegedAction;
 import java.security.PrivilegedActionException;
 import java.security.PrivilegedExceptionAction;
 import java.util.*;
-
-import javax.naming.Context;
-import javax.naming.NamingEnumeration;
-import javax.naming.NamingException;
-import javax.naming.directory.*;
 import javax.security.auth.Subject;
 import javax.security.auth.login.LoginException;
 import javax.xml.bind.DatatypeConverter;
@@ -43,7 +35,6 @@ import javax.xml.bind.DatatypeConverter;
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.ExceptionsHelper;
 import org.elasticsearch.action.admin.cluster.node.liveness.LivenessRequest;
-import org.elasticsearch.common.SuppressForbidden;
 import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.env.Environment;
 import org.elasticsearch.rest.RestRequest;
@@ -52,6 +43,7 @@ import org.elasticsearch.shield.User;
 import org.elasticsearch.shield.authc.AuthenticationToken;
 import org.elasticsearch.shield.authc.Realm;
 import org.elasticsearch.shield.authc.RealmConfig;
+import org.elasticsearch.shield.authc.support.DnRoleMapper;
 import org.elasticsearch.transport.TransportMessage;
 import org.ietf.jgss.GSSContext;
 import org.ietf.jgss.GSSCredential;
@@ -59,14 +51,11 @@ import org.ietf.jgss.GSSException;
 import org.ietf.jgss.GSSManager;
 import org.ietf.jgss.GSSName;
 
-import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Iterators;
-import com.google.common.collect.ListMultimap;
 
 import de.codecentric.elasticsearch.plugin.kerberosrealm.support.JaasKrbUtil;
 import de.codecentric.elasticsearch.plugin.kerberosrealm.support.KrbConstants;
 import de.codecentric.elasticsearch.plugin.kerberosrealm.support.SettingConstants;
-import org.yaml.snakeyaml.Yaml;
 
 /**
  */
@@ -77,101 +66,28 @@ public class KerberosRealm extends Realm<KerberosAuthenticationToken> {
     private final boolean stripRealmFromPrincipalName;
     private final String acceptorPrincipal;
     private final Path acceptorKeyTabPath;
-    private final String keyStorePath;
-    private final String keyStorePassword;
-    // maps principal string to shield role
-    private final ListMultimap<String, String> rolesMap = ArrayListMultimap.<String, String> create();
-    // maps group string to shield role
-    private final ListMultimap<String, String> groupMap = ArrayListMultimap.<String, String> create();
     private final Environment env;
     private final boolean mockMode;
-    
-    private final String ldapConnectionString;
-    private final String ldapDomain;
-    private final String ldapUser;
-    private final String ldapPassword;
     private final String roleMappingPath;
-    //private final String ldapGroupBase;
 
-    @SuppressForbidden(
-            reason = "just trying this out"
-    )
+    private int ldapCacheMinutes = SettingConstants.DEFAULT_LDAP_CACHE_MINUTES;
+    private int maxNestedGroupDepth = SettingConstants.DEFAULT_MAX_NESTED_GROUP_DEPTH;
+    private int maxThreadsToUseToFindNestedGroups = SettingConstants.DEFAULT_MAX_THREADS_TO_USE_TO_FIND_NESTED_GROUPS;
+
+    private final LDAPHelper ldapHelper;
+    private final RoleMapper roleMapper;
+    private final RoleCacheRefresher cacheRefresher;
+    private final FileWatcher fileWatcher;
+
     public KerberosRealm(final RealmConfig config) {
         super(TYPE, config);
         stripRealmFromPrincipalName = config.settings().getAsBoolean(SettingConstants.STRIP_REALM_FROM_PRINCIPAL, true);
         acceptorPrincipal = config.settings().get(SettingConstants.ACCEPTOR_PRINCIPAL, null);
         final String acceptorKeyTab = config.settings().get(SettingConstants.ACCEPTOR_KEYTAB_PATH, null);
-        
-        ldapConnectionString = config.settings().get(SettingConstants.LDAP_URL);
-        ldapDomain = config.settings().get(SettingConstants.LDAP_DOMAIN);
-        //ldapGroupBase = config.settings().get(SettingConstants.LDAP_GROUP_BASE);
-        ldapUser = config.settings().get(SettingConstants.LDAP_USER, null);
-        ldapPassword = config.settings().get(SettingConstants.LDAP_PASSWORD, null);
-        roleMappingPath = config.settings().get(SettingConstants.ROLE_MAPPING_PATH, null);
-        
-        logger.debug("ldapDomain Path: {}", ldapDomain);
-        //logger.debug("ldapGroupBase: {}", ldapGroupBase);
-        logger.debug("ldapConnectionString: {}", ldapConnectionString);
-        
-        
-        keyStorePath = config.globalSettings().get(SettingConstants.KEYSTORE_PATH, null);
-        keyStorePassword = config.globalSettings().get(SettingConstants.KEYSTORE_PASSWORD, null);
-                
-        logger.debug("KeyStore Path: {}", keyStorePath);
-
-        Map<String, ArrayList<String>> roleGroups;
-        Yaml yaml = new Yaml();
-        InputStream shieldConfigStream = null;
-
-        try {
-            logger.debug("Roles file path" + roleMappingPath);
-            Path file = Paths.get(roleMappingPath);
-            logger.debug("Created file path object");
-            shieldConfigStream = Files.newInputStream(file);
-            logger.debug("Loaded file into InputStream");
-
-            roleGroups = (Map<String, ArrayList<String>>) yaml.load(shieldConfigStream);
-            logger.debug("Loaded file into yaml");
-        } catch (IOException e) {
-            throw new ElasticsearchException("Failed to load roles from Shield file in KerberosRealm");
-        } finally {
-            if (shieldConfigStream != null) {
-                try {
-                    shieldConfigStream.close();
-                } catch (Exception e) {
-                    // no-op
-                }
-            }
-        }
 
 
-        if(roleGroups != null) {
-            logger.debug("Starting, add roles");
-            for(String roleGroup:roleGroups.keySet()) {
-                logger.debug("Found Elastic role: " + roleGroup);
-                for(String principalOrGroup:roleGroups.get(roleGroup)) {
-                    String cleanPrincipalOrGroup = principalOrGroup.replace("\"", "");
-                    logger.debug("Found AD object in role Role: " + roleGroup + " AD Object: " + cleanPrincipalOrGroup);
-                    String groupSid;
-                    javax.naming.directory.Attributes atts = getADObjectAttributes(cleanPrincipalOrGroup);
-                    if(atts.get("objectClass").contains("group")){
-                        groupSid = getSidFromGroup(cleanPrincipalOrGroup);
-                        logger.debug("Adding group to Role: " + roleGroup + " Group: " + cleanPrincipalOrGroup);
-                            groupMap.put(cleanPrincipalOrGroup, roleGroup);
-                        logger.debug("Found group {}:{}", cleanPrincipalOrGroup, groupSid);
-                    } else {
-                        logger.debug("Adding User to Role: " + roleGroup + " User: " + cleanPrincipalOrGroup);
-                        try {
-                            rolesMap.put(stripRealmName(atts.get("userprincipalname").get().toString(), stripRealmFromPrincipalName), roleGroup);
-                        } catch (NamingException e){
-                            logger.error("Failed to get group SID {}", cleanPrincipalOrGroup, e);
-                        }
-                    }
-                }
-            }
-        }       
-
-        logger.debug("Parsed roles: {}", rolesMap);
+        roleMappingPath = DnRoleMapper.resolveFile(config.settings(), config.env()).toAbsolutePath().toString();
+        logger.warn("sheild config location " + roleMappingPath);
 
         env = new Environment(config.globalSettings());
         mockMode = config.settings().getAsBoolean("mock_mode", false);
@@ -183,239 +99,41 @@ public class KerberosRealm extends Realm<KerberosAuthenticationToken> {
         if (acceptorKeyTab == null) {
             throw new ElasticsearchException("Unconfigured (but required) property: {}", SettingConstants.ACCEPTOR_KEYTAB_PATH);
         }
-        
-        if (keyStorePath == null) {
-            throw new ElasticsearchException("Unconfigured (but required) property: {}", SettingConstants.KEYSTORE_PATH);
-        }
-        
-        if (keyStorePassword == null) {
-            throw new ElasticsearchException("Unconfigured (but required) property: {}", SettingConstants.KEYSTORE_PASSWORD);
-        }
 
         acceptorKeyTabPath = env.configFile().resolve(acceptorKeyTab);
 
         if (!mockMode && (!Files.isReadable(acceptorKeyTabPath) && !Files.isDirectory(acceptorKeyTabPath))) {
             throw new ElasticsearchException("File not found or not readable: {}", acceptorKeyTabPath.toAbsolutePath());
         }
-    }
 
-    /*protected KerberosRealm(final String type, final RealmConfig config) {
-        this(config);
-    }*/
-
-    /*
-     * The binary data is in the form:
-     * byte[0] - revision level
-     * byte[1] - count of sub-authorities
-     * byte[2-7] - 48 bit authority (big-endian)
-     * and then count x 32 bit sub authorities (little-endian)
-     * 
-     * The String value is: S-Revision-Authority-SubAuthority[n]...
-     * 
-     * Based on code from here - http://forums.oracle.com/forums/thread.jspa?threadID=1155740&tstart=0
-     */
-    public static String decodeSID(byte[] sid) {
-    
-        final StringBuilder strSid = new StringBuilder("S-");
-    
-        // get version
-        final int revision = sid[0];
-        strSid.append(Integer.toString(revision));
-    
-        //next byte is the count of sub-authorities
-        final int countSubAuths = sid[1] & 0xFF;
-    
-        //get the authority
-        long authority = 0;
-        //String rid = "";
-        for(int i = 2; i <= 7; i++) {
-            authority |= ((long)sid[i]) << (8 * (5 - (i - 2)));
-        }
-        strSid.append("-");
-        strSid.append(Long.toHexString(authority));
-    
-        //iterate all the sub-auths
-        int offset = 8;
-        int size = 4; //4 bytes for each sub auth
-        for(int j = 0; j < countSubAuths; j++) {
-            long subAuthority = 0;
-            for(int k = 0; k < size; k++) {
-                subAuthority |= (long)(sid[offset + k] & 0xFF) << (8 * k);
-            }
-    
-            strSid.append("-");
-            strSid.append(subAuthority);
-    
-            offset += size;
-        }
-    
-        return strSid.toString();    
-    }
-
-        private boolean isInRole(String group, String principal){
-            String query = "(&(objectClass=user)(sAMAccountName=" + principal + ")(memberOf:1.2.840.113556.1.4.1941:=" + group + "))";
-            logger.debug("isInRole query: " + query);
-            NamingEnumeration<SearchResult> results = queryLdap(query);
-            try{
-                logger.debug("isInRole hasMoreElements: " + results.hasMoreElements());
-                return results.hasMoreElements();
-            } catch(Exception e){
-                return false;
-            }
-        }
-
-    private NamingEnumeration<SearchResult> queryLdap(String query){
-        Hashtable<String, Object> env = new Hashtable<String, Object>(11);
-        env.put(Context.INITIAL_CONTEXT_FACTORY, "com.sun.jndi.ldap.LdapCtxFactory");
-        env.put("java.naming.ldap.factory.socket", TrustAllSSLSocketFactory.class.getName());
-        env.put("javax.net.ssl.keyStore", this.keyStorePath);
-        env.put("javax.net.ssl.keyStorePassword", this.keyStorePassword);
-
-        if(ldapUser != null && ldapPassword != null){
-            env.put(Context.SECURITY_AUTHENTICATION, "simple");
-            env.put(Context.SECURITY_PRINCIPAL, ldapUser);
-            env.put(Context.SECURITY_CREDENTIALS, ldapPassword);
-            logger.debug("Connecting to LDAP with username: {}", ldapUser);
-        }else{
-            env.put(Context.SECURITY_AUTHENTICATION, "none");
-            logger.debug("Attempting anonymous bind");
-        }
-
-        env.put(Context.PROVIDER_URL, ldapConnectionString);
-        env.put("java.naming.ldap.attributes.binary", "objectSID");
-
-        List<String> formatedDomain = new ArrayList<String>();
-        for(String dc:(ldapDomain.split("\\."))){
-           formatedDomain.add("DC=" + dc + ",");
-        }
-        String searchBase = "";
-        for(int i = 0; i < formatedDomain.size(); i++){
-           searchBase +=  formatedDomain.get(i);
-        }
-        searchBase = searchBase.substring(0,  searchBase.length()-1);
-        logger.debug("Search base {}", searchBase);
-
-        // Grab the current classloader to restore after loading custom sockets in JNDI context
-        ClassLoader cl = Thread.currentThread().getContextClassLoader();
-
-        DirContext ctx = null;
         try {
-
-            Thread.currentThread().setContextClassLoader(TrustAllSSLSocketFactory.class.getClassLoader());
-            // Create initial context
-            ctx = new InitialDirContext(env);
-
-
-            SearchControls searchControls = new SearchControls();
-            searchControls.setSearchScope(SearchControls.SUBTREE_SCOPE);
-
-            return ctx.search(searchBase, query, searchControls);
-
-        } catch (NamingException e) {
-            logger.error("Could not connect to LDAP with provided method", e);
-        } finally {
-            if(ctx != null){
-                try {
-                    ctx.close();
-                } catch (NamingException e) {
-                    // pass
-                }
-            }
-            Thread.currentThread().setContextClassLoader(cl);
+            ldapCacheMinutes = Integer.parseInt(config.settings().get(SettingConstants.LDAP_CACHE_MINUTES, "60"));
+        } catch (NumberFormatException e) {
+            logger.warn("Incorrect format for {}", SettingConstants.LDAP_CACHE_MINUTES);
         }
-        return null;
-    }
-
-    private javax.naming.directory.Attributes getADObjectAttributes(String distinguishedName){
-        Hashtable<String, Object> env = new Hashtable<String, Object>(11);
-        env.put(Context.INITIAL_CONTEXT_FACTORY, "com.sun.jndi.ldap.LdapCtxFactory");
-        env.put("java.naming.ldap.factory.socket", TrustAllSSLSocketFactory.class.getName());
-        env.put("javax.net.ssl.keyStore", this.keyStorePath);
-        env.put("javax.net.ssl.keyStorePassword", this.keyStorePassword);
-
-        if(ldapUser != null && ldapPassword != null){
-            env.put(Context.SECURITY_AUTHENTICATION, "simple");
-            env.put(Context.SECURITY_PRINCIPAL, ldapUser);
-            env.put(Context.SECURITY_CREDENTIALS, ldapPassword);
-            logger.debug("Connecting to LDAP with username: {}", ldapUser);
-        }else{
-            env.put(Context.SECURITY_AUTHENTICATION, "none");
-            logger.debug("Attempting anonymous bind");
-        }
-
-        env.put(Context.PROVIDER_URL, ldapConnectionString);
-        env.put("java.naming.ldap.attributes.binary", "objectSID");
-
-        // Grab the current classloader to restore after loading custom sockets in JNDI context
-        ClassLoader cl = Thread.currentThread().getContextClassLoader();
-
-        DirContext ctx = null;
         try {
-
-            Thread.currentThread().setContextClassLoader(TrustAllSSLSocketFactory.class.getClassLoader());
-            // Create initial context
-            ctx = new InitialDirContext(env);
-
-            return ctx.getAttributes(distinguishedName);
-
-
-        } catch (NamingException e) {
-            logger.error("Could not connect to LDAP with provided method", e);
-        } finally {
-            if(ctx != null){
-                try {
-                    ctx.close();
-                } catch (NamingException e) {
-                    // pass
-                }
-            }
-            Thread.currentThread().setContextClassLoader(cl);
+            maxNestedGroupDepth = Integer.parseInt(config.settings().get(SettingConstants.MAX_NESTED_GROUP_DEPTH, "15"));
+        } catch (NumberFormatException e) {
+            logger.warn("Incorrect format for {}", SettingConstants.MAX_NESTED_GROUP_DEPTH);
         }
-        return null;
-    }
-    
-    private String getSidFromGroup(String distinguishedName){
+
         try {
-            javax.naming.directory.Attributes attributes = getADObjectAttributes(distinguishedName);
-            if(attributes != null) {
-                byte[] sidbytes = null;
-                sidbytes = (byte[])attributes.get("objectSid").get();
-                return decodeSID(sidbytes);
-            }
-        } catch (NamingException e) {
-            logger.error("Error retrieving sid from distinguished name '{}' : {}", distinguishedName,e);
-        }
-        return null;
-    }
-
-    private ArrayList<String> getUserRoles(String sAMAccountName){
-        ArrayList<String> groups = new ArrayList<String>();
-        String query = "(&(objectClass=user)(sAMAccountName=" + sAMAccountName + "))";
-
-        try{
-            NamingEnumeration<SearchResult> result = queryLdap(query);
-            //javax.naming.directory.Attributes
-            if(result != null && result.hasMore()){
-                SearchResult user = result.nextElement();
-                javax.naming.directory.Attributes userAttributes = user.getAttributes();
-                javax.naming.directory.Attribute memberobAttribute =  userAttributes.get("memberof");
-
-                NamingEnumeration memberGroups = memberobAttribute.getAll();
-                while (memberGroups.hasMore() ) {
-                    String group = memberGroups.next().toString();
-                    if(!groups.contains(group)){
-                        logger.debug("User {} in LDAP group {}", sAMAccountName, group);
-                        groups.add(group);
-                    }
-                }
-            }
-        }catch (Exception e){
-            logger.warn("Error occurred filtering user groups", e);
+            maxThreadsToUseToFindNestedGroups = Integer.parseInt(config.settings().get(SettingConstants.MAX_THREADS_TO_USE_TO_FIND_NESTED_GROUPS, "50"));
+        } catch (NumberFormatException e) {
+            logger.warn("Incorrect format for {}", SettingConstants.MAX_THREADS_TO_USE_TO_FIND_NESTED_GROUPS);
         }
 
-        return groups;
-    }
+        ldapHelper = new LDAPHelper(config, logger);
+        roleMapper = new RoleMapper(roleMappingPath, ldapHelper, stripRealmFromPrincipalName, maxNestedGroupDepth, maxThreadsToUseToFindNestedGroups, logger);
 
+        cacheRefresher = new RoleCacheRefresher(roleMapper, ldapCacheMinutes);
+        fileWatcher = new FileWatcher(roleMappingPath, roleMapper, logger);
+
+        Thread cacheThread = new Thread(cacheRefresher);
+        Thread fileWatcherThread = new Thread(fileWatcher);
+        cacheThread.start();
+        fileWatcherThread.start();
+    }
 
     @Override
     public boolean supports(final AuthenticationToken token) {
@@ -507,7 +225,7 @@ public class KerberosRealm extends Realm<KerberosAuthenticationToken> {
 
                     principal = Subject.doAs(subject, new AuthenticateAction(logger, gssContext, stripRealmFromPrincipalName));
 
-                    groups = getUserRoles(principal.getName());
+                    groups = ldapHelper.getUserRoles(principal.getName());
 
                 } catch (final LoginException e) {
                     logger.error("Login exception due to {}", e, e.toString());
@@ -584,18 +302,18 @@ public class KerberosRealm extends Realm<KerberosAuthenticationToken> {
         }
 
         String[] userRoles = new String[0];
-        List<String> userRolesList = rolesMap.get(actualUser);
+        List<String> userRolesList = roleMapper.rolesMap.get(actualUser);
         
               
         if(actualGroups != null){                
             for(String group: actualGroups){
-                if(groupMap.containsKey(group)){
-                    for(String role:groupMap.get(group)){
+                if(roleMapper.groupMap.containsKey(group)){
+                    for(String role:roleMapper.groupMap.get(group)){
                         if(!userRolesList.contains(role)){
                             userRolesList.add(role);
                         }
                     }
-                    logger.debug("User '{}' found in AD group {} mapping to shield role {}", actualUser, group, Arrays.toString(groupMap.get(group).toArray(new String[0])));
+                    logger.debug("User '{}' found in AD group {} mapping to shield role {}", actualUser, group, Arrays.toString(roleMapper.groupMap.get(group).toArray(new String[0])));
                 }
             }
         }
