@@ -3,6 +3,8 @@ h1. X-Pack Kerberos Realm
 p. Kerberos/SPNEGO custom realm for Elasticsearch X-Pack 5.6.3.
 Authenticate HTTP and Transport requests via Kerberos/SPNEGO.
 
+p. Tested with Active Directory and works with User and Group (including nested) principals. Not the most beautiful implementation but it get's the job done.
+
 **Limited Single Sign On support in Kibana**
 
 h2. License
