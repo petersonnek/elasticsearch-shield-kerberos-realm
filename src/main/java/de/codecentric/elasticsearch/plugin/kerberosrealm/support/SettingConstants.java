@@ -43,8 +43,8 @@ public class SettingConstants {
     public static final int DEFAULT_MAX_NESTED_GROUP_DEPTH = 15;
     public static final int DEFAULT_MAX_THREADS_TO_USE_TO_FIND_NESTED_GROUPS = 50;
 
-    public static final String KEYSTORE_PATH = "shield.ssl.keystore.path";
-    public static final String KEYSTORE_PASSWORD = "shield.ssl.keystore.password";
+    public static final String KEYSTORE_PATH = "xpack.ssl.keystore.path";
+    public static final String KEYSTORE_PASSWORD = "xpack.ssl.keystore.password";
     
             
 

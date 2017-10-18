@@ -10,6 +10,7 @@ logs/
 build/
 target/
 *-execution-hints.log
+*-execution-times.log
 docs/html/
 docs/build.log
 /tmp/
@@ -31,5 +32,7 @@ nb-configuration.xml
 nbactions.xml
 
 dependency-reduced-pom.xml
-integ_test_t*
-testtmp
+classes
+gradle/
+gradlew
+gradlew.bat

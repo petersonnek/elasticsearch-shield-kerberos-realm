@@ -21,14 +21,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-import org.elasticsearch.common.logging.ESLogger;
+import org.apache.logging.log4j.Logger;
 import org.elasticsearch.common.logging.Loggers;
-import org.elasticsearch.shield.authc.AuthenticationToken;
+import org.elasticsearch.xpack.security.authc.AuthenticationToken;
 
 public class KerberosAuthenticationToken implements AuthenticationToken {
 
     static final KerberosAuthenticationToken LIVENESS_TOKEN = new KerberosAuthenticationToken(new byte[]{1,2,3}, "LIVENESS_TOKEN");
-    protected final ESLogger logger = Loggers.getLogger(this.getClass());
+    protected final Logger logger = Loggers.getLogger(this.getClass());
     private byte[] outToken;
     private final String principal;
     private List<String> groups;

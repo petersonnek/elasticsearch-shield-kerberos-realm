@@ -1,10 +1,28 @@
+/*
+   Copyright 2015 codecentric AG
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+
+   Author: Hendrik Saly <hendrik.saly@codecentric.de>
+ */
+
 package de.codecentric.elasticsearch.plugin.kerberosrealm.realm;
 
 import de.codecentric.elasticsearch.plugin.kerberosrealm.support.SettingConstants;
 import org.elasticsearch.ElasticsearchException;
-import org.elasticsearch.common.logging.ESLogger;
+import org.apache.logging.log4j.Logger;
 import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.shield.authc.RealmConfig;
+import org.elasticsearch.xpack.security.authc.RealmConfig;
 
 import javax.naming.Context;
 import javax.naming.NamingEnumeration;
@@ -16,7 +34,7 @@ import javax.naming.directory.SearchResult;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Hashtable;
-import java.util.List;
+import java.util.Locale;
 
 public class LDAPHelper {
 
@@ -27,9 +45,9 @@ public class LDAPHelper {
     private final String ldapConnectionString;
     private final String ldapDomain;
 
-    private final ESLogger logger;
+    private final Logger logger;
 
-    public LDAPHelper(RealmConfig config, ESLogger esLogger ){
+    public LDAPHelper(RealmConfig config, Logger esLogger ){
         Settings settings = config.settings();
         logger = esLogger;
 
@@ -122,14 +140,14 @@ public class LDAPHelper {
 
     public ArrayList<String> getMemberGroups(String groupDistinguishedName){
                         logger.debug("Getting member groups in Group " + groupDistinguishedName);
-        ArrayList<String> nestedGroups = new ArrayList();
+        ArrayList<String> nestedGroups = new ArrayList<String>();
 
         String query = "(&(objectClass=group)(memberOf=" + groupDistinguishedName + "))";
 
         try{
             NamingEnumeration<SearchResult> result = queryLdap(query);
             //javax.naming.directory.Attributes
-            if(result != null && result.hasMore()){
+            while(result != null && result.hasMore()){
                 SearchResult group = result.nextElement();
                 String nestedGroupDistinguishedName = group.getAttributes().get("distinguishedname").get().toString();
                 nestedGroups.add(nestedGroupDistinguishedName);
@@ -153,7 +171,7 @@ public class LDAPHelper {
     }
 
     public ArrayList<String> getUserRoles(String sAMAccountName){
-        ArrayList<String> groups = new ArrayList();
+        ArrayList<String> groups = new ArrayList<String>();
         String query = "(&(objectClass=user)(sAMAccountName=" + sAMAccountName + "))";
 
         try{
@@ -164,12 +182,12 @@ public class LDAPHelper {
                 javax.naming.directory.Attributes userAttributes = user.getAttributes();
                 javax.naming.directory.Attribute memberobAttribute =  userAttributes.get("memberof");
 
-                NamingEnumeration memberGroups = memberobAttribute.getAll();
+                NamingEnumeration<?> memberGroups = memberobAttribute.getAll();
                 while (memberGroups.hasMore() ) {
                     String group = memberGroups.next().toString();
                     if(!groups.contains(group)){
                         logger.debug("User {} in LDAP group {}", sAMAccountName, group);
-                        groups.add(group);
+                        groups.add(group.toLowerCase(Locale.ENGLISH));
                     }
                 }
             }
@@ -181,7 +199,7 @@ public class LDAPHelper {
     }
 
     private NamingEnumeration<SearchResult> queryLdap(String query){
-        Hashtable<String, Object> env = new Hashtable(11);
+        Hashtable<String, Object> env = new Hashtable<String, Object>(11);
         env.put(Context.INITIAL_CONTEXT_FACTORY, "com.sun.jndi.ldap.LdapCtxFactory");
         env.put("java.naming.ldap.factory.socket", TrustAllSSLSocketFactory.class.getName());
         env.put("javax.net.ssl.keyStore", keyStorePath);
@@ -200,7 +218,7 @@ public class LDAPHelper {
         env.put(Context.PROVIDER_URL, ldapConnectionString);
         env.put("java.naming.ldap.attributes.binary", "objectSID");
 
-        List<String> formatedDomain = new ArrayList();
+        ArrayList<String> formatedDomain = new ArrayList<String>();
         for(String dc:(ldapDomain.split("\\."))){
             formatedDomain.add("DC=" + dc + ",");
         }

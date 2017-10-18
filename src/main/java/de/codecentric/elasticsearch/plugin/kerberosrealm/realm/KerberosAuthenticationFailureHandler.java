@@ -17,13 +17,14 @@
  */
 package de.codecentric.elasticsearch.plugin.kerberosrealm.realm;
 
+import org.apache.logging.log4j.Logger;
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.ElasticsearchSecurityException;
-import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.common.logging.Loggers;
+import org.elasticsearch.common.util.concurrent.ThreadContext;
 import org.elasticsearch.rest.RestRequest;
-import org.elasticsearch.shield.authc.AuthenticationToken;
-import org.elasticsearch.shield.authc.DefaultAuthenticationFailureHandler;
+import org.elasticsearch.xpack.security.authc.AuthenticationToken;
+import org.elasticsearch.xpack.security.authc.DefaultAuthenticationFailureHandler;
 import org.elasticsearch.transport.TransportMessage;
 
 import de.codecentric.elasticsearch.plugin.kerberosrealm.support.KrbConstants;
@@ -32,21 +33,38 @@ import de.codecentric.elasticsearch.plugin.kerberosrealm.support.KrbConstants;
  */
 public class KerberosAuthenticationFailureHandler extends DefaultAuthenticationFailureHandler {
 
-    protected final ESLogger logger = Loggers.getLogger(this.getClass());
+    protected final Logger logger = Loggers.getLogger(this.getClass());
 
     @Override
-    public ElasticsearchSecurityException unsuccessfulAuthentication(final RestRequest request, final AuthenticationToken token) {
-        final ElasticsearchSecurityException e = super.unsuccessfulAuthentication(request, token);
+    public ElasticsearchSecurityException failedAuthentication(final RestRequest request,
+                                                               final AuthenticationToken token,
+                                                               final ThreadContext context) {
+        final ElasticsearchSecurityException e = super.failedAuthentication(request, token, context);
         e.addHeader(KrbConstants.WWW_AUTHENTICATE, KrbConstants.NEGOTIATE);
         if (logger.isDebugEnabled()) {
-            logger.debug("unsuccessfulAuthentication for rest request and token {}", token);
+            logger.debug("failedAuthentication for rest request and token {}", token);
         }
         return e;
     }
 
     @Override
-    public ElasticsearchSecurityException missingToken(final RestRequest request) {
-        final ElasticsearchSecurityException e = super.missingToken(request);
+    public ElasticsearchSecurityException failedAuthentication(final TransportMessage message,
+                                                               final AuthenticationToken token,
+                                                               final String action,
+                                                               final ThreadContext context) {
+        final ElasticsearchSecurityException se = super.failedAuthentication(message, token, action, context);
+        se.addHeader(KrbConstants.WWW_AUTHENTICATE, KrbConstants.NEGOTIATE);
+
+        if (logger.isDebugEnabled()) {
+            logger.debug("failedAuthentication for {} transport message and token {}", action, token);
+        }
+
+        return se;
+    }
+
+    @Override
+    public ElasticsearchSecurityException missingToken(final RestRequest request, final ThreadContext context) {
+        final ElasticsearchSecurityException e = super.missingToken(request, context);
         e.addHeader(KrbConstants.WWW_AUTHENTICATE, KrbConstants.NEGOTIATE);
         if (logger.isDebugEnabled()) {
             logger.debug("missing token for rest request");
@@ -55,8 +73,22 @@ public class KerberosAuthenticationFailureHandler extends DefaultAuthenticationF
     }
 
     @Override
-    public ElasticsearchSecurityException exceptionProcessingRequest(final RestRequest request, final Exception e) {
-        final ElasticsearchSecurityException se = super.exceptionProcessingRequest(request, e);
+    public ElasticsearchSecurityException missingToken(final TransportMessage message, final String action, final ThreadContext context) {
+        final ElasticsearchSecurityException se = super.missingToken(message, action, context);
+        se.addHeader(KrbConstants.WWW_AUTHENTICATE, KrbConstants.NEGOTIATE);
+
+        if (logger.isDebugEnabled()) {
+            logger.debug("missing token for {} transport message", action);
+        }
+
+        return se;
+    }
+
+    @Override
+    public ElasticsearchSecurityException exceptionProcessingRequest(final RestRequest request,
+                                                                     final Exception e,
+                                                                     final ThreadContext context) {
+        final ElasticsearchSecurityException se = super.exceptionProcessingRequest(request, e, context);
         String outToken = "";
         if (e instanceof ElasticsearchException) {
             final ElasticsearchException kae = (ElasticsearchException) e;
@@ -75,19 +107,9 @@ public class KerberosAuthenticationFailureHandler extends DefaultAuthenticationF
     }
 
     @Override
-    public ElasticsearchSecurityException authenticationRequired(final String action) {
-        final ElasticsearchSecurityException se = super.authenticationRequired(action);
-        se.addHeader(KrbConstants.WWW_AUTHENTICATE, KrbConstants.NEGOTIATE);
-
-        if (logger.isDebugEnabled()) {
-            logger.debug("authentication required for action {}", action);
-        }
-        return se;
-    }
-
-    @Override
-    public ElasticsearchSecurityException exceptionProcessingRequest(final TransportMessage message, final Exception e) {
-        final ElasticsearchSecurityException se = super.exceptionProcessingRequest(message, e);
+    public ElasticsearchSecurityException exceptionProcessingRequest(final TransportMessage message, final String action, final Exception e,
+                                                                     final ThreadContext context) {
+        final ElasticsearchSecurityException se = super.exceptionProcessingRequest(message, action, e, context);
         String outToken = "";
 
         if (e instanceof ElasticsearchException) {
@@ -106,27 +128,13 @@ public class KerberosAuthenticationFailureHandler extends DefaultAuthenticationF
     }
 
     @Override
-    public ElasticsearchSecurityException missingToken(final TransportMessage message, final String action) {
-        final ElasticsearchSecurityException se = super.missingToken(message, action);
+    public ElasticsearchSecurityException authenticationRequired(final String action, final ThreadContext context) {
+        final ElasticsearchSecurityException se = super.authenticationRequired(action, context);
         se.addHeader(KrbConstants.WWW_AUTHENTICATE, KrbConstants.NEGOTIATE);
 
         if (logger.isDebugEnabled()) {
-            logger.debug("missing token for {} transport message", action);
+            logger.debug("authentication required for action {}", action);
         }
-
-        return se;
-    }
-
-    @Override
-    public ElasticsearchSecurityException unsuccessfulAuthentication(final TransportMessage message, final AuthenticationToken token,
-            final String action) {
-        final ElasticsearchSecurityException se = super.unsuccessfulAuthentication(message, token, action);
-        se.addHeader(KrbConstants.WWW_AUTHENTICATE, KrbConstants.NEGOTIATE);
-
-        if (logger.isDebugEnabled()) {
-            logger.debug("unsuccessfulAuthentication for {} transport message and token {}", action, token);
-        }
-
         return se;
     }
 

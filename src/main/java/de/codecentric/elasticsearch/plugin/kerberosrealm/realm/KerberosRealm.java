@@ -18,7 +18,6 @@
  */
 package de.codecentric.elasticsearch.plugin.kerberosrealm.realm;
 
-import java.io.Serializable;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -27,24 +26,22 @@ import java.security.Principal;
 import java.security.PrivilegedAction;
 import java.security.PrivilegedActionException;
 import java.security.PrivilegedExceptionAction;
-import java.util.*;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Locale;
 import javax.security.auth.Subject;
 import javax.security.auth.login.LoginException;
-import javax.xml.bind.DatatypeConverter;
-
+import org.elasticsearch.xpack.security.user.XPackUser;
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.ExceptionsHelper;
-import org.elasticsearch.action.admin.cluster.node.liveness.LivenessRequest;
-import org.elasticsearch.common.logging.ESLogger;
+import org.apache.logging.log4j.Logger;
 import org.elasticsearch.env.Environment;
-import org.elasticsearch.rest.RestRequest;
-import org.elasticsearch.shield.InternalSystemUser;
-import org.elasticsearch.shield.User;
-import org.elasticsearch.shield.authc.AuthenticationToken;
-import org.elasticsearch.shield.authc.Realm;
-import org.elasticsearch.shield.authc.RealmConfig;
-import org.elasticsearch.shield.authc.support.DnRoleMapper;
-import org.elasticsearch.transport.TransportMessage;
+import org.elasticsearch.common.util.concurrent.ThreadContext;
+import org.elasticsearch.xpack.security.user.User;
+import org.elasticsearch.xpack.security.authc.AuthenticationToken;
+import org.elasticsearch.xpack.security.authc.Realm;
+import org.elasticsearch.xpack.security.authc.RealmConfig;
+import org.elasticsearch.xpack.security.authc.support.DnRoleMapper;
 import org.ietf.jgss.GSSContext;
 import org.ietf.jgss.GSSCredential;
 import org.ietf.jgss.GSSException;
@@ -57,11 +54,16 @@ import de.codecentric.elasticsearch.plugin.kerberosrealm.support.JaasKrbUtil;
 import de.codecentric.elasticsearch.plugin.kerberosrealm.support.KrbConstants;
 import de.codecentric.elasticsearch.plugin.kerberosrealm.support.SettingConstants;
 
+import org.elasticsearch.action.ActionListener;
+import org.apache.commons.codec.binary.Base64;
+
 /**
  */
-public class KerberosRealm extends Realm<KerberosAuthenticationToken> {
+public class KerberosRealm extends Realm {
 
     public static final String TYPE = "cc-kerberos";
+
+    public static final String AUTHORIZATION_HEADER = "Authorization";
 
     private final boolean stripRealmFromPrincipalName;
     private final String acceptorPrincipal;
@@ -118,13 +120,15 @@ public class KerberosRealm extends Realm<KerberosAuthenticationToken> {
         }
 
         try {
-            maxThreadsToUseToFindNestedGroups = Integer.parseInt(config.settings().get(SettingConstants.MAX_THREADS_TO_USE_TO_FIND_NESTED_GROUPS, "50"));
+            maxThreadsToUseToFindNestedGroups = Integer.parseInt(
+                    config.settings().get(SettingConstants.MAX_THREADS_TO_USE_TO_FIND_NESTED_GROUPS, "50"));
         } catch (NumberFormatException e) {
             logger.warn("Incorrect format for {}", SettingConstants.MAX_THREADS_TO_USE_TO_FIND_NESTED_GROUPS);
         }
 
         ldapHelper = new LDAPHelper(config, logger);
-        roleMapper = new RoleMapper(roleMappingPath, ldapHelper, stripRealmFromPrincipalName, maxNestedGroupDepth, maxThreadsToUseToFindNestedGroups, logger);
+        roleMapper = new RoleMapper(roleMappingPath, ldapHelper, stripRealmFromPrincipalName,
+                                    maxNestedGroupDepth, maxThreadsToUseToFindNestedGroups, logger);
 
         cacheRefresher = new RoleCacheRefresher(roleMapper, ldapCacheMinutes);
         fileWatcher = new FileWatcher(roleMappingPath, roleMapper, logger);
@@ -135,20 +139,24 @@ public class KerberosRealm extends Realm<KerberosAuthenticationToken> {
         fileWatcherThread.start();
     }
 
+    public KerberosRealm(final String type, final RealmConfig config) {
+        this(config);
+    }
+
     @Override
     public boolean supports(final AuthenticationToken token) {
         return token instanceof KerberosAuthenticationToken;
     }
 
     @Override
-    public KerberosAuthenticationToken token(final RestRequest request) {
+    public KerberosAuthenticationToken token(ThreadContext threadContext) {
         if (logger.isDebugEnabled()) {
-            logger.debug("Rest request headers: {}", Iterators.toString(request.headers().iterator()));
+            logger.debug("Rest request headers: {}", Iterators.toString(threadContext.getHeaders().entrySet().iterator()));
         }
-        final String authorizationHeader = request.header("Authorization");
+        final String authorizationHeader = threadContext.getHeader(AUTHORIZATION_HEADER);
         final KerberosAuthenticationToken token = token(authorizationHeader);
         if (token != null && logger.isDebugEnabled()) {
-            logger.debug("Rest request token '{}' for {} successully generated", token, request.path());
+            logger.debug("Rest request token '{}' successully generated", token);
         }
         return token;
     }
@@ -196,7 +204,8 @@ public class KerberosRealm extends Realm<KerberosAuthenticationToken> {
                 throw new ElasticsearchException("Bad 'Authorization' header");
             } else {
 
-                final byte[] decodedNegotiateHeader = DatatypeConverter.parseBase64Binary(authorizationHeader.substring(10));
+                final byte[] decodedNegotiateHeader = Base64.decodeBase64(authorizationHeader.substring(10));
+                //final byte[] decodedNegotiateHeader = DatatypeConverter.parseBase64Binary(authorizationHeader.substring(10));
 
                 GSSContext gssContext = null;
                 byte[] outToken = null;
@@ -228,17 +237,17 @@ public class KerberosRealm extends Realm<KerberosAuthenticationToken> {
                     groups = ldapHelper.getUserRoles(principal.getName());
 
                 } catch (final LoginException e) {
-                    logger.error("Login exception due to {}", e, e.toString());
+                    logger.error("Login exception due to " + e.toString(), e);
                     throw ExceptionsHelper.convertToRuntime(e);
                 } catch (final GSSException e) {
-                    logger.error("Ticket validation not successful due to {}", e, e.toString());
+                    logger.error("Ticket validation not successful due to " + e.toString(), e);
                     throw ExceptionsHelper.convertToRuntime(e);
                 } catch (final PrivilegedActionException e) {
                     final Throwable cause = e.getCause();
                     if (cause instanceof GSSException) {
-                        logger.warn("Service login not successful due to {}", e, e.toString());
+                        logger.warn("Service login not successful due to " + e.toString(), e);
                     } else {
-                        logger.error("Service login not successful due to {}", e, e.toString());
+                        logger.error("Service login not successful due to " + e.toString(), e);
                     }
                     throw ExceptionsHelper.convertToRuntime(e);
                 } finally {
@@ -254,11 +263,17 @@ public class KerberosRealm extends Realm<KerberosAuthenticationToken> {
 
                 if (principal == null) {
                     final ElasticsearchException ee = new ElasticsearchException("Principal null");
-                    ee.addHeader("kerberos_out_token", DatatypeConverter.printBase64Binary(outToken));
+                    //ee.addHeader("kerberos_out_token", DatatypeConverter.printBase64Binary(outToken));
+                    //ee.addHeader("kerberos_out_token", new String(Base64.encodeBase64(outToken)));
+                    ee.addHeader("kerberos_out_token", Base64.encodeBase64(outToken).toString());
                     throw ee;
                 }
 
                 final String username = ((SimpleUserPrincipal) principal).getName();
+                if (logger.isDebugEnabled()) {
+                    logger.debug("Completed tokenKerb outToken: {} , username: {} , groups: {}",
+                            outToken, username, Arrays.toString(groups.toArray()));
+                }
                 return new KerberosAuthenticationToken(outToken, username, groups);
             }
 
@@ -267,30 +282,19 @@ public class KerberosRealm extends Realm<KerberosAuthenticationToken> {
         }
     }
 
+    @Deprecated
     @Override
-    public KerberosAuthenticationToken token(final TransportMessage<?> message) {
-
-        if (logger.isDebugEnabled()) {
-            logger.debug("Transport request headers: {}", message.getHeaders());
-        }
-
-        if (message instanceof LivenessRequest) {
-            return KerberosAuthenticationToken.LIVENESS_TOKEN;
-        }
-
-        final String authorizationHeader = message.getHeader("Authorization");
-        final KerberosAuthenticationToken token = token(authorizationHeader);
-        if (token != null && logger.isDebugEnabled()) {
-            logger.debug("Transport message token '{}' for message {} successully generated", token, message.getClass());
-        }
-        return token;
+    public User authenticate(AuthenticationToken authenticationToken) {
+        throw new UnsupportedOperationException("Deprecated");
     }
 
     @Override
-    public User authenticate(final KerberosAuthenticationToken token) {
+    public void authenticate(AuthenticationToken authenticationToken, ActionListener<User> listener) {
+        try {
+        KerberosAuthenticationToken token = (KerberosAuthenticationToken) authenticationToken;
 
         if(token == KerberosAuthenticationToken.LIVENESS_TOKEN) {
-            return InternalSystemUser.INSTANCE;
+            listener.onResponse(XPackUser.INSTANCE);
         }
 
         final String actualUser = token.principal();
@@ -298,22 +302,30 @@ public class KerberosRealm extends Realm<KerberosAuthenticationToken> {
 
         if (actualUser == null || actualUser.isEmpty() || token.credentials() == null) {
             logger.warn("User '{}' cannot be authenticated", actualUser);
-            return null;
+            listener.onResponse(null);
         }
 
         String[] userRoles = new String[0];
         List<String> userRolesList = roleMapper.rolesMap.get(actualUser);
-        
+
+
+            if (logger.isDebugEnabled()) {
+                logger.debug("In authenticate User '{}'. User AD groups {} , Roles {}",
+                        actualUser, Arrays.toString(actualGroups.toArray()), roleMapper.groupMap.toString());
+            }
               
         if(actualGroups != null){                
             for(String group: actualGroups){
                 if(roleMapper.groupMap.containsKey(group)){
                     for(String role:roleMapper.groupMap.get(group)){
-                        if(!userRolesList.contains(role)){
+                        if(!userRolesList.contains(role.toLowerCase(Locale.ENGLISH))){
                             userRolesList.add(role);
                         }
                     }
-                    logger.debug("User '{}' found in AD group {} mapping to shield role {}", actualUser, group, Arrays.toString(roleMapper.groupMap.get(group).toArray(new String[0])));
+                    logger.debug("User '{}' found in AD group {} mapping to xpack role {}",
+                            actualUser,
+                            group,
+                            Arrays.toString(roleMapper.groupMap.get(group).toArray(new String[0])));
                 }
             }
         }
@@ -323,7 +335,11 @@ public class KerberosRealm extends Realm<KerberosAuthenticationToken> {
         }
         
         logger.debug("User '{}' with roles {} successully authenticated", actualUser, Arrays.toString(userRoles));
-        return new User(actualUser, userRoles);
+            listener.onResponse(new User(actualUser, userRoles));
+
+        } catch (Exception e) {
+            listener.onFailure(e);
+        }
     }
 
     @Override
@@ -360,11 +376,11 @@ public class KerberosRealm extends Realm<KerberosAuthenticationToken> {
     //borrowed from Apache Tomcat 8 http://svn.apache.org/repos/asf/tomcat/tc8.0.x/trunk/
     private static class AuthenticateAction implements PrivilegedAction<Principal> {
 
-        private final ESLogger logger;
+        private final Logger logger;
         private final GSSContext gssContext;
         private final boolean strip;
 
-        private AuthenticateAction(final ESLogger logger, final GSSContext gssContext, final boolean strip) {
+        private AuthenticateAction(final Logger logger, final GSSContext gssContext, final boolean strip) {
             super();
             this.logger = logger;
             this.gssContext = gssContext;
@@ -378,7 +394,7 @@ public class KerberosRealm extends Realm<KerberosAuthenticationToken> {
     }
 
     //borrowed from Apache Tomcat 8 http://svn.apache.org/repos/asf/tomcat/tc8.0.x/trunk/
-    private static String getUsernameFromGSSContext(final GSSContext gssContext, final boolean strip, final ESLogger logger) {
+    private static String getUsernameFromGSSContext(final GSSContext gssContext, final boolean strip, final Logger logger) {
         if (gssContext.isEstablished()) {
             GSSName gssName = null;
             try {
@@ -410,9 +426,7 @@ public class KerberosRealm extends Realm<KerberosAuthenticationToken> {
         return name;
     }
 
-    private static class SimpleUserPrincipal implements Principal, Serializable {
-
-        private static final long serialVersionUID = -1;
+    private static class SimpleUserPrincipal implements Principal {
         private final String username;
 
         SimpleUserPrincipal(final String username) {

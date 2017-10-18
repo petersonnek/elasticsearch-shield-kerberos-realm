@@ -1,0 +1,50 @@
+X-Pack Kerberos Realm
+=====================
+Kerberos/SPNEGO custom realm for Elasticsearch X-Pack 5.6.3.
+Authenticate HTTP and Transport requests via Kerberos/SPNEGO.
+
+**Limited Single Sign On support in Kibana**
+
+###License
+Apache License Version 2.0
+
+###Features
+
+* Kerberos/SPNEGO REST/HTTP authentication
+* Kerberos/SPNEGO Transport authentication
+* No JAAS login.conf required
+* No external dependencies
+
+###Prerequisites
+
+* Elasticsearch 5.6.3
+* X-Pack Plugin 5.6.3
+    * role_mapping.yml file used in the AD realm populated with roles, users and groups using the standard X-Pack format
+    * roles created via the API or roles.yml file
+* Kerberos Infrastructure (ActiveDirectory, MIT, Heimdal, ...)
+
+###Install release
+
+    $ bin/plugin install file:///path/to/target/elasticsearch-shield-kerberos-realm/build/distributions/elasticsearch-shield-kerberos-realm-5.6.3.zip
+
+###Build and install latest
+    $ git clone
+    $ gradle clean
+    $ gradle build
+    $ gradle buildZip
+    $ bin/plugin install file:///path/to/target/elasticsearch-shield-kerberos-realm/build/distributions/elasticsearch-shield-kerberos-realm-5.6.3.zip
+
+###Configuration
+
+Configuration is done in elasticsearch.yml
+
+    xpack.security.authc.realms.kerb.acceptor_keytab_path: /path/to/server.keytab
+    xpack.security.authc.realms.kerb.acceptor_principal: HTTP/localhost@REALM.COM
+    xpack.security.authc.realms.kerb.ldap_cache_minutes: 60
+    xpack.security.authc.realms.kerb.ldap_domain: realm.com
+    xpack.security.authc.realms.kerb.ldap_password: password
+    xpack.security.authc.realms.kerb.ldap_url: ldaps://domaincontroller.realm.com:3269
+    xpack.security.authc.realms.kerb.ldap_user: user
+    xpack.security.authc.realms.kerb.order: 0
+    xpack.security.authc.realms.kerb.strip_realm_from_principal: true
+    xpack.security.authc.realms.kerb.type: cc-kerberos

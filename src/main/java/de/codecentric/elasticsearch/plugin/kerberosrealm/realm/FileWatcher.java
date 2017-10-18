@@ -1,10 +1,33 @@
+/*
+   Copyright 2015 codecentric AG
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+
+   Author: Hendrik Saly <hendrik.saly@codecentric.de>
+ */
+
 package de.codecentric.elasticsearch.plugin.kerberosrealm.realm;
 
 import org.elasticsearch.common.SuppressForbidden;
-import org.elasticsearch.common.logging.ESLogger;
+import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
-import java.nio.file.*;
+import java.nio.file.FileSystems;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.WatchEvent;
+import java.nio.file.WatchKey;
+import java.nio.file.WatchService;
 
 import static java.nio.file.StandardWatchEventKinds.ENTRY_MODIFY;
 
@@ -14,9 +37,9 @@ import static java.nio.file.StandardWatchEventKinds.ENTRY_MODIFY;
 public class FileWatcher implements Runnable{
     private final String _roleMappingFilePath;
     private final RoleMapper _roleMapper;
-    private final ESLogger logger;
+    private final Logger logger;
 
-    public FileWatcher(String roleMappingFilePath, RoleMapper roleMapper, ESLogger esLogger){
+    public FileWatcher(String roleMappingFilePath, RoleMapper roleMapper, Logger esLogger){
         _roleMappingFilePath = roleMappingFilePath;
         _roleMapper = roleMapper;
         logger = esLogger;

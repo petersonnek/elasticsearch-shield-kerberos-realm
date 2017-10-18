@@ -111,7 +111,7 @@ public final class JaasKrbUtil {
         private final Path keytabPath;
         private final boolean initiator;
 
-        public KeytabJaasConf(final String principal, final Path keytab, final boolean initiator) {
+        KeytabJaasConf(final String principal, final Path keytab, final boolean initiator) {
             this.principal = principal;
             this.keytabPath = keytab;
             this.initiator = initiator;
@@ -139,7 +139,7 @@ public final class JaasKrbUtil {
         private final String principal;
         private final Path clientCredentialPath;
 
-        public TicketCacheJaasConf(final String principal, final Path clientCredentialPath) {
+        TicketCacheJaasConf(final String principal, final Path clientCredentialPath) {
             this.principal = principal;
             this.clientCredentialPath = clientCredentialPath;
         }
@@ -165,7 +165,7 @@ public final class JaasKrbUtil {
     static class PasswordJaasConf extends Configuration {
         private final String principal;
 
-        public PasswordJaasConf(final String principal) {
+        PasswordJaasConf(final String principal) {
             this.principal = principal;
         }
 

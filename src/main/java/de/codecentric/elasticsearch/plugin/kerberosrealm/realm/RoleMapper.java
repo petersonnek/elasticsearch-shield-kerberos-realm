@@ -1,9 +1,27 @@
+/*
+   Copyright 2015 codecentric AG
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+
+   Author: Hendrik Saly <hendrik.saly@codecentric.de>
+ */
+
 package de.codecentric.elasticsearch.plugin.kerberosrealm.realm;
 
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ListMultimap;
 import org.elasticsearch.common.SuppressForbidden;
-import org.elasticsearch.common.logging.ESLogger;
+import org.apache.logging.log4j.Logger;
 import org.yaml.snakeyaml.Yaml;
 
 import javax.naming.NamingException;
@@ -18,9 +36,9 @@ import java.util.Map;
         reason = "Loading Shiled role_mapping.yml file with io.File"
 )
 public class RoleMapper {
-    private final ESLogger logger;
+    private final Logger logger;
     private final boolean _stripRealmFromPrincipalName;
-    // maps principal string to shield role
+    // maps principal string to xpack role
     public ListMultimap<String, String> rolesMap = ArrayListMultimap.create();
     // maps group string to shield role
     public ListMultimap<String, String> groupMap = ArrayListMultimap.create();
@@ -33,7 +51,12 @@ public class RoleMapper {
     private Object rolesLock = new Object();
     private Object groupLock = new Object();
 
-    public RoleMapper(String roleMappingFilePath, LDAPHelper ldapHelper, boolean stripRealmFromPrincipalName, int maxGroupDepth, int maxThreads, ESLogger esLogger){
+    public RoleMapper(String roleMappingFilePath,
+                      LDAPHelper ldapHelper,
+                      boolean stripRealmFromPrincipalName,
+                      int maxGroupDepth,
+                      int maxThreads,
+                      Logger esLogger){
         _roleMappingFilePath = roleMappingFilePath;
         _ldapHelper = ldapHelper;
         _stripRealmFromPrincipalName = stripRealmFromPrincipalName;
@@ -42,7 +65,7 @@ public class RoleMapper {
         logger = esLogger;
     }
 
-
+    @SuppressWarnings("unchecked")
     public void LoadRoles(){
         // maps principal string to shield role
         ListMultimap<String, String> tempRolesMap = ArrayListMultimap.create();
@@ -67,16 +90,18 @@ public class RoleMapper {
                         if (atts.get("objectClass").contains("group")) {
                             groupSid = _ldapHelper.getSidFromGroup(cleanPrincipalOrGroup);
                             logger.debug("Adding group to Role: " + roleGroup + " Group: " + cleanPrincipalOrGroup);
-                            tempGroupMap.put(cleanPrincipalOrGroup, roleGroup);
-                            for (String nestedGroup : _ldapHelper.getNestedGroupsInGroup(cleanPrincipalOrGroup, maxNestedGroupDepth, maxThreadsToUseToFindNestedGroups)) {
+                            tempGroupMap.put(cleanPrincipalOrGroup.toLowerCase(), roleGroup.toLowerCase());
+                            for (String nestedGroup : _ldapHelper.getNestedGroupsInGroup(
+                                    cleanPrincipalOrGroup, maxNestedGroupDepth, maxThreadsToUseToFindNestedGroups)) {
                                 logger.debug("Adding nested group to Role: " + roleGroup + " Group: " + nestedGroup);
-                                tempGroupMap.put(nestedGroup, roleGroup);
+                                tempGroupMap.put(nestedGroup.toLowerCase(), roleGroup.toLowerCase());
                             }
                             logger.debug("Found group " + cleanPrincipalOrGroup + ":" + groupSid);
                         } else {
                             logger.debug("Adding User to Role: " + roleGroup + " User: " + cleanPrincipalOrGroup);
                             try {
-                                tempRolesMap.put(stripRealmName(atts.get("userprincipalname").get().toString(), _stripRealmFromPrincipalName), roleGroup);
+                                tempRolesMap.put(stripRealmName(atts.get("userprincipalname").get().toString(),
+                                                                _stripRealmFromPrincipalName), roleGroup);
                             } catch (NamingException e) {
                                 logger.debug("Failed to get group SID " + cleanPrincipalOrGroup + " " + e);
                             }
