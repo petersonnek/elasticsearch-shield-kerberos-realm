@@ -1,7 +1,7 @@
 h1. X-Pack Kerberos Realm
 
 p. Kerberos/SPNEGO custom realm for Elasticsearch X-Pack 5.6.3.
-p. Authenticate HTTP and Transport requests via Kerberos/SPNEGO.
+Authenticate HTTP and Transport requests via Kerberos/SPNEGO.
 
 **Limited Single Sign On support in Kibana**
 
@@ -28,6 +28,7 @@ h2. Install release
     $ bin/plugin install file:///path/to/target/elasticsearch-shield-kerberos-realm/build/distributions/elasticsearch-shield-kerberos-realm-5.6.3.zip
 
 h2. Build and install latest
+
     $ git clone
     $ gradle clean
     $ gradle build
