@@ -1,21 +1,21 @@
-X-Pack Kerberos Realm
-=====================
+h1.X-Pack Kerberos Realm
+
 Kerberos/SPNEGO custom realm for Elasticsearch X-Pack 5.6.3.
 Authenticate HTTP and Transport requests via Kerberos/SPNEGO.
 
 **Limited Single Sign On support in Kibana**
 
-###License
+h2. License
 Apache License Version 2.0
 
-###Features
+h2. Features
 
 * Kerberos/SPNEGO REST/HTTP authentication
 * Kerberos/SPNEGO Transport authentication
 * No JAAS login.conf required
 * No external dependencies
 
-###Prerequisites
+h2. Prerequisites
 
 * Elasticsearch 5.6.3
 * X-Pack Plugin 5.6.3
@@ -23,18 +23,18 @@ Apache License Version 2.0
     * roles created via the API or roles.yml file
 * Kerberos Infrastructure (ActiveDirectory, MIT, Heimdal, ...)
 
-###Install release
+h2. Install release
 
     $ bin/plugin install file:///path/to/target/elasticsearch-shield-kerberos-realm/build/distributions/elasticsearch-shield-kerberos-realm-5.6.3.zip
 
-###Build and install latest
+h2. Build and install latest
     $ git clone
     $ gradle clean
     $ gradle build
     $ gradle buildZip
     $ bin/plugin install file:///path/to/target/elasticsearch-shield-kerberos-realm/build/distributions/elasticsearch-shield-kerberos-realm-5.6.3.zip
 
-###Configuration
+h2. Configuration
 
 Configuration is done in elasticsearch.yml
 
