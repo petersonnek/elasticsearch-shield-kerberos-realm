@@ -20,8 +20,8 @@ h2. Prerequisites
 
 * Elasticsearch 5.6.3
 * X-Pack Plugin 5.6.3
-    * role_mapping.yml file used in the AD realm populated with roles, users and groups using the standard X-Pack format
-    * roles created via the API or roles.yml file
+    ** role_mapping.yml file used in the AD realm populated with roles, users and groups using the standard X-Pack format
+    ** roles created via the API or roles.yml file
 * Kerberos Infrastructure (ActiveDirectory, MIT, Heimdal, ...)
 
 h2. Install release
